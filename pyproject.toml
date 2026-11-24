@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "urban-fabric-lab"
+version = "0.1.0"
+description = "Reproducible OSM urban morphology metrics and Neo4j spatial graphs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "geopandas>=1.0,<2",
+  "osmnx>=2.0,<3",
+  "momepy>=0.9,<0.12",
+  "shapely>=2.0,<3",
+  "pyproj>=3.6,<4",
+  "networkx>=3.4,<4",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "pyarrow>=18,<25",
+  "neo4j>=5.26,<7",
+  "PyYAML>=6,<7",
+  "python-dotenv>=1,<2",
+  "ijson>=3.3,<4",
+  "requests>=2.32,<3",
+  "scipy>=1.12,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+pbf = ["osmium>=4.1,<5"]
+rhino = ["rhino3dm>=8.35,<9"]
+plot = ["matplotlib>=3.9,<4"]
+
+[project.scripts]
+urban-fabric = "urban_fabric.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

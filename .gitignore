@@ -1,0 +1,20 @@
+.venv/
+.local/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.env
+.env.*
+!.env.example
+data/
+cache/
+build/
+dist/
+# Existing literature notes and extracted copyrighted documents remain local.
+outputs/
+# Original model/SHP files and downloaded release archives are distributed as release assets.
+source_files/
+*.zip

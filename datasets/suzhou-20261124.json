@@ -1,0 +1,23 @@
+{
+  "release": "suzhou-data-20261124",
+  "study_area": "suzhou_old_city",
+  "model_sha256": "bd738f10b14c7758bedc7e004931695273d6dc402fd44b4effdea1599714a2a4",
+  "assets": [
+    {
+      "part": "sources",
+      "name": "suzhou-sources-20261124.zip",
+      "url": "https://github.com/EMGit269/Neo4j/releases/download/suzhou-data-20261124/suzhou-sources-20261124.zip",
+      "bytes": 104958498,
+      "sha256": "deb1a35265a6ab57e5a789996a7b80980293f8946aace0f36a3efe19df1ee486",
+      "file_count": 135
+    },
+    {
+      "part": "analysis",
+      "name": "suzhou-analysis-20261124.zip",
+      "url": "https://github.com/EMGit269/Neo4j/releases/download/suzhou-data-20261124/suzhou-analysis-20261124.zip",
+      "bytes": 112304067,
+      "sha256": "f1972059fc9ebadec61adac0e6b3df095eab1f6b8ad36ccd05e85e7d93929a8d",
+      "file_count": 107
+    }
+  ]
+}

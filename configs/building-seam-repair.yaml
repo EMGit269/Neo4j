@@ -1,0 +1,22 @@
+version: 1
+study_area_id: suzhou_old_city
+source_local: ../data/suzhou_rhino_model/building_candidates.parquet
+georeferencing_report: ../data/suzhou_old_city/georeferenced/georeferencing.json
+area_local: ../data/suzhou_old_city/area.parquet
+area_metric: ../data/suzhou_old_city/georeferenced/analysis_window.parquet
+output_dir: ../data/suzhou_old_city/repaired
+parameters:
+  # Native model XY units, not true ground metres. Only diagnostic/repair tolerances.
+  neighbor_tolerance: 0.08
+  precision_grid: 0.05
+  minimum_seam_length: 1.5
+  maximum_cross_axis_spread: 0.20
+  grid_cluster_gap: 5.0
+  grid_minimum_pairs: 5
+  grid_minimum_spatial_span: 80.0
+  endpoint_tolerance: 0.16
+  maximum_outer_edge_turn_degrees: 15.0
+  maximum_area_change_ratio: 0.002
+  maximum_boundary_displacement: 0.12
+  maximum_group_members: 16
+  maximum_iterations: 4

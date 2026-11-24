@@ -1,0 +1,18 @@
+# User-selected Rhino coordinates, not an admin boundary or true ground metres.
+# bbox_local_m is a legacy key: 1 model unit = 0.00001 geographic degrees in XY.
+study_area:
+  id: suzhou_old_city
+  name: 古城区分析窗口
+  bbox_local_m: [23000, 0, 29000, 5000]
+paths:
+  source_dir: ../data/suzhou_rhino_model
+  data_dir: ../data/suzhou_old_city
+georeferencing:
+  report: ../data/suzhou_old_city/georeferenced/georeferencing.json
+  metric_exports: ../data/suzhou_old_city/georeferenced
+active_buildings:
+  data_dir: ../data/suzhou_old_city/repaired
+  geometry: ../data/suzhou_old_city/repaired/buildings.parquet
+  metrics: ../data/suzhou_old_city/repaired/building_metrics.csv
+  report: ../data/suzhou_old_city/repaired/repair_report.json
+  source_geometry_preserved: ../data/suzhou_old_city/georeferenced/buildings.parquet

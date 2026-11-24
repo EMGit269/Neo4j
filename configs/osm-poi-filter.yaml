@@ -1,0 +1,91 @@
+# POI means mapped places/functions, not every tagged OSM object.
+version: 1
+study_area: suzhou_old_city
+area_file: ../data/suzhou_old_city/georeferenced/analysis_window_wgs84.geojson
+metric_reference: ../data/suzhou_old_city/georeferenced/analysis_window.parquet
+output_dir: ../data/suzhou_old_city/osm_pois
+query_tags:
+  amenity: true
+  shop: true
+  tourism: true
+  leisure: true
+  historic: true
+  office: true
+  craft: true
+  healthcare: true
+  club: true
+  government: true
+  emergency: true
+  man_made: true
+  natural: true
+  public_transport: true
+  railway: true
+  aeroway: true
+  industrial: true
+  landuse: true
+  sport: true
+  heritage: true
+  telecom: true
+  power: true
+  place: [square, locality]
+  boundary: [protected_area, national_park]
+  highway: [bus_stop, street_lamp, elevator, rest_area, services, emergency_access_point]
+  building:
+    - school
+    - university
+    - college
+    - kindergarten
+    - hospital
+    - hotel
+    - museum
+    - civic
+    - public
+    - office
+    - retail
+    - commercial
+    - supermarket
+    - sports_hall
+    - stadium
+    - train_station
+    - transportation
+    - temple
+    - church
+    - monastery
+    - religious
+    - fire_station
+  disused:amenity: true
+  disused:shop: true
+  abandoned:amenity: true
+  abandoned:shop: true
+excluded_values:
+  building: [fire_station]
+  natural: [tree, tree_row, shrub, scrub, grassland, heath, wood, wetland, bare_rock, scree, sand]
+  highway: [street_lamp, elevator, emergency_access_point]
+  emergency: [fire_station, fire_hydrant, fire_extinguisher, fire_hose, fire_water_pond, fire_service_inlet,
+              fire_alarm_box, fire_suction_point, dry_riser, water_tank, assembly_point,
+              defibrillator, phone, lifeguard, life_ring, rescue_box, landing_site]
+  amenity: [fire_station, bench, waste_basket, waste_disposal, recycling, drinking_water,
+            telephone, post_box, vending_machine, bicycle_parking, parking_space,
+            parking_entrance, grit_bin, hunting_stand, give_box, lounger, clock,
+            dog_toilet, dog_excrement_bag, shower, barbecue, shelter, fountain,
+            bicycle_repair_station]
+  man_made: [street_lamp, surveillance, monitoring_station, utility_pole, pipeline,
+             pumping_station, manhole, mast, antenna, flagpole, cross, cairn,
+             survey_point, marker, water_tap, water_well, well, pier, bridge,
+             embankment, cutline, breakwater, groyne, beacon, chimney, storage_tank,
+             silo, covered_reservoir, water_tower, communications_tower]
+  railway: [rail, light_rail, subway, tram, narrow_gauge, construction, abandoned,
+            disused, buffer_stop, switch, signal, crossing, level_crossing,
+            railway_crossing, milestone, ventilation_shaft]
+  leisure: [slipway, firepit, picnic_table, bleachers]
+  historic: [boundary_stone, milestone]
+  aeroway: [taxiway, runway, apron, gate, navigationaid, holding_position, windsock]
+excluded_keys_without_place_function: [power, telecom]
+lifecycle_values: ['yes', 'true', '1']
+tourist_information_kept: [office, visitor_centre, visitor_center]
+named_natural_kept: [water, beach, peak, spring, cave_entrance, hot_spring, hill, rock, cliff]
+deduplication:
+  # Same exact name + same subcategory + point inside area, or same Wikidata inside area.
+  # Distinct branches, adjacent objects and different functions are never merged by proximity.
+  merge_matching_point_in_area: true
+  merge_disjoint_same_name: false
