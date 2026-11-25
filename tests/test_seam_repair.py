@@ -210,3 +210,29 @@ def test_user_requested_grid_seams_merge_even_when_outer_edges_do_not_continue(p
     assert merged.height_extent_m == 9
     assert merged.height_conflict
     assert not result.remaining_seam_review.any()
+
+
+def test_internal_seams_use_each_parents_part_indices_and_preserve_distant_islands(parameters):
+    from shapely.geometry import MultiPolygon
+
+    from urban_fabric.seam_repair import _merge_internal_parts
+
+    geometries = [
+        MultiPolygon([box(0, y, 10, y + 10), box(10.02, y, 20, y + 10), box(40, y, 45, y + 5)])
+        for y in [0, 100]
+    ]
+    frame = gpd.GeoDataFrame({"work_id": [10, 20], "geometry": geometries}, crs=LOCAL_METRES)
+    repaired, events = _merge_internal_parts(
+        frame,
+        parameters,
+        [{"axis": "x", "minimum_coordinate": 10, "maximum_coordinate": 10}],
+        None,
+        True,
+    )
+    assert len(events) == 2
+    for geometry, y in zip(repaired.geometry, [0, 100], strict=True):
+        assert geometry.is_valid
+        assert len(shapely.get_parts(geometry)) == 2
+        assert geometry.covers(box(0, y, 20, y + 10).buffer(-0.01))
+        assert geometry.covers(box(40, y, 45, y + 5))
+        assert geometry.area == pytest.approx(225, abs=0.01)

@@ -1,4 +1,4 @@
-"""Conservative, traceable footprint repair along repeated source subdivision seams.
+"""Traceable footprint repair along repeated source subdivision seams.
 
 Native XY coordinates supply subdivision evidence, not physical measurements.
 Only accepted groups are snapped; metric geometry/measurements are exported separately.
@@ -239,8 +239,8 @@ def _merge_internal_parts(frame, parameters, grids, force_merge_area, merge_all_
         if not merge_all_grid_candidates and not row.geometry.intersects(force_merge_area):
             continue
         parts.extend(
-            {"parent": position, "geometry": geometry}
-            for geometry in shapely.get_parts(row.geometry)
+            {"parent": position, "part_index": part_index, "geometry": geometry}
+            for part_index, geometry in enumerate(shapely.get_parts(row.geometry))
         )
     if len(parts) < 2:
         return frame, []
@@ -265,7 +265,7 @@ def _merge_internal_parts(frame, parameters, grids, force_merge_area, merge_all_
         repaired_parts = []
         for group in nx.connected_components(graph):
             indices = sorted(group)
-            consumed.update(indices)
+            consumed.update(exploded.part_index.iloc[indices].astype(int))
             merged, method = merge_geometry(
                 exploded.geometry.iloc[indices].to_numpy(), parameters, force=True
             )
@@ -372,10 +372,12 @@ def repair_seams(
                 )
                 continue
             force_group = bool(force_positions.intersection(positions))
-            geometry, method = merge_geometry(originals[members], parameters, force=force_group)
+            geometry, method = merge_geometry(
+                current.geometry.iloc[positions].to_numpy(), parameters, force=force_group
+            )
             if geometry is None:
                 if force_group:
-                    geometry = shapely.union_all(originals[members])
+                    geometry = shapely.union_all(current.geometry.iloc[positions].to_numpy())
                     method = "preserved_source_parts_as_multipart"
                 else:
                     events.append(
@@ -389,6 +391,9 @@ def repair_seams(
                     continue
             wid = min(work_ids)
             source_members[wid] = members
+            for event in internal_events:
+                if event["work_id"] in work_ids:
+                    event["work_id"] = wid
             successful.append((positions, wid, geometry))
             events.append(
                 {
@@ -485,6 +490,7 @@ def repair_seams(
             "source_footprint_review": bool(parts.footprint_requires_review.any()),
             "footprint_requires_review": bool(parts.footprint_requires_review.any())
             or merged
+            or internal_merged
             or int(row.work_id) in review_ids,
             "repair_basis": (
                 "+".join(
@@ -507,7 +513,8 @@ def repair_seams(
                     "building_id": uid,
                     "source_component_id": int(frame.component_id.iloc[index]),
                     "source_height_m": float(frame.height_extent_m.iloc[index]),
-                    "seam_merged": merged,
+                    "seam_merged": merged or internal_merged,
+                    "internal_seam_merged": internal_merged,
                 }
             )
     repaired = gpd.GeoDataFrame(rows, crs=frame.crs)

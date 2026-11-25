@@ -60,6 +60,8 @@ def main(config_path):
         force_merge_area=core_local if config.get("merge_all_grid_supported_candidates") else None,
         merge_all_grid_candidates=bool(config.get("merge_all_grid_supported_candidates", False)),
     )
+    repaired_local.to_parquet(out / "all_model_buildings_local.parquet", index=False)
+    membership.to_parquet(out / "all_model_source_membership.parquet", index=False)
     selected = repaired_local[repaired_local.intersection(core_local).area > 0].copy()
     selected = selected.reset_index(drop=True)
     members = membership[membership.building_id.isin(selected.id)].copy()
@@ -115,6 +117,11 @@ def main(config_path):
         raise ValueError("Recalculated metrics/IDs failed validation.")
     if buildings.height_extent_m.isna().any():
         raise ValueError("A source building group is missing its maximum source-part height.")
+    expected_heights = members.groupby("building_id").source_height_m.max()
+    if not np.allclose(
+        buildings.height_extent_m.to_numpy(), buildings.id.map(expected_heights).to_numpy()
+    ):
+        raise ValueError("A building height differs from its traced source-part maximum.")
     original_core = source[source.intersection(core_local).area > 0]
     original_projected = projected(original_core[["id", "geometry"]], transform, crs)
     before_union = original_projected.geometry.union_all().intersection(core)
