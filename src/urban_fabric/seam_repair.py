@@ -180,7 +180,7 @@ def is_grid_supported(row, grids, parameters):
     )
 
 
-def merge_geometry(geometries, parameters):
+def merge_geometry(geometries, parameters, *, force=False):
     original = shapely.union_all(geometries)
     if not original.area:
         return None, "zero_area"
@@ -208,20 +208,94 @@ def merge_geometry(geometries, parameters):
             snapped = shapely.union(
                 shapely.snap(snapped, part, parameters.neighbor_tolerance), part
             )
-        if acceptable(snapped):
+        if acceptable(snapped) or (force and snapped.geom_type == "Polygon" and snapped.is_valid):
             return snapped, "mutual_seam_snap_union"
     except shapely.errors.GEOSException:
         pass
     # Bounded fallback when vertex topology cannot be reconciled by snapping.
     merged = shapely.union_all(geometries, grid_size=parameters.precision_grid)
     if merged.geom_type != "Polygon" or not merged.is_valid:
+        if force:
+            closed = merged.buffer(parameters.neighbor_tolerance).buffer(
+                -parameters.neighbor_tolerance
+            )
+            if closed.geom_type == "Polygon" and closed.is_valid:
+                return closed, "user_authorized_local_gap_close"
+            return merged, "preserved_source_parts_as_multipart"
         return None, "remaining_gap_or_multipart"
-    if not acceptable(merged):
+    if not acceptable(merged) and not (force and merged.geom_type == "Polygon" and merged.is_valid):
         return None, "excessive_geometry_change"
     return merged, "local_precision_union"
 
 
-def repair_seams(source, parameters):
+def _merge_internal_parts(frame, parameters, grids, force_merge_area, merge_all_grid_candidates):
+    """Dissolve repeated-grid seams inside a source MultiPolygon."""
+    if force_merge_area is None and not merge_all_grid_candidates:
+        return frame, []
+    parts = []
+    for position, row in enumerate(frame.itertuples()):
+        if row.geometry.geom_type != "MultiPolygon":
+            continue
+        if not merge_all_grid_candidates and not row.geometry.intersects(force_merge_area):
+            continue
+        parts.extend(
+            {"parent": position, "geometry": geometry}
+            for geometry in shapely.get_parts(row.geometry)
+        )
+    if len(parts) < 2:
+        return frame, []
+    exploded = gpd.GeoDataFrame(parts, geometry="geometry", crs=frame.crs).reset_index(drop=True)
+    candidates = find_seam_candidates(exploded, parameters)
+    graphs = {}
+    for row in candidates.itertuples():
+        left_parent = int(exploded.parent.iloc[row.left])
+        right_parent = int(exploded.parent.iloc[row.right])
+        if left_parent != right_parent or not is_grid_supported(row, grids, parameters):
+            continue
+        graph = graphs.setdefault(left_parent, nx.Graph())
+        graph.add_edge(int(row.left), int(row.right))
+    if not graphs:
+        return frame, []
+
+    result = frame.copy()
+    events = []
+    for parent, graph in graphs.items():
+        all_parts = [geometry for geometry in shapely.get_parts(frame.geometry.iloc[parent])]
+        consumed = set()
+        repaired_parts = []
+        for group in nx.connected_components(graph):
+            indices = sorted(group)
+            consumed.update(indices)
+            merged, method = merge_geometry(
+                exploded.geometry.iloc[indices].to_numpy(), parameters, force=True
+            )
+            if merged is None:
+                # Preserve the exact source coverage under one logical multipart feature.
+                merged = shapely.union_all(exploded.geometry.iloc[indices].to_numpy())
+                method = "preserved_source_parts_as_multipart"
+            repaired_parts.append(merged)
+            events.append(
+                {
+                    "work_id": int(frame.work_id.iloc[parent]),
+                    "part_count": len(indices),
+                    "method": method,
+                    "decision": "merged_internal_grid_seam",
+                }
+            )
+        repaired_parts.extend(
+            geometry for index, geometry in enumerate(all_parts) if index not in consumed
+        )
+        result.at[result.index[parent], "geometry"] = shapely.union_all(repaired_parts)
+    return result, events
+
+
+def repair_seams(
+    source,
+    parameters,
+    *,
+    force_merge_area=None,
+    merge_all_grid_candidates=False,
+):
     frame = source.reset_index(drop=True).copy()
     if not frame.id.is_unique or not frame.is_valid.all():
         raise ValueError("Repair needs unique source IDs and valid footprints.")
@@ -230,22 +304,41 @@ def repair_seams(source, parameters):
     first_candidates = find_seam_candidates(frame, parameters)
     grids = infer_grid_lines(first_candidates, parameters)
     current = gpd.GeoDataFrame({"work_id": list(source_members)}, geometry=originals, crs=frame.crs)
-    events, pair_decisions = [], []
+    events, pair_decisions, internal_events = [], [], []
     for iteration in range(parameters.maximum_iterations):
         candidates = (
             first_candidates if iteration == 0 else find_seam_candidates(current, parameters)
         )
         graph = nx.Graph()
+        force_positions = set()
         for row in candidates.itertuples():
             left_id = int(current.work_id.iloc[row.left])
             right_id = int(current.work_id.iloc[row.right])
             supported = is_grid_supported(row, grids, parameters)
             continuous = row.maximum_outer_turn <= parameters.maximum_outer_edge_turn_degrees
-            decision = "accepted_evidence" if supported and continuous else "review"
+            in_authorized_area = (
+                not merge_all_grid_candidates
+                and force_merge_area is not None
+                and (
+                    current.geometry.iloc[row.left].intersection(force_merge_area).area > 0
+                    or current.geometry.iloc[row.right].intersection(force_merge_area).area > 0
+                )
+            )
+            forced = supported and (merge_all_grid_candidates or in_authorized_area)
+            accepted = supported and (continuous or forced)
+            decision = (
+                "accepted_user_requested_all_suspected_seams"
+                if forced
+                else ("accepted_evidence" if supported and continuous else "review")
+            )
             reason = (
-                "grid_and_continuous_outline"
-                if supported and continuous
-                else ("not_repeated_grid_line" if not supported else "outline_discontinuity")
+                "grid_supported_in_user_requested_all_suspected_seams"
+                if forced
+                else (
+                    "grid_and_continuous_outline"
+                    if supported and continuous
+                    else ("not_repeated_grid_line" if not supported else "outline_discontinuity")
+                )
             )
             pair_decisions.append(
                 {
@@ -259,8 +352,10 @@ def repair_seams(source, parameters):
                     ),
                 }
             )
-            if supported and continuous:
+            if accepted:
                 graph.add_edge(row.left, row.right)
+                if forced:
+                    force_positions.update([int(row.left), int(row.right)])
         successful = []
         for cluster in nx.connected_components(graph):
             positions = sorted(cluster)
@@ -276,17 +371,22 @@ def repair_seams(source, parameters):
                     }
                 )
                 continue
-            geometry, method = merge_geometry(originals[members], parameters)
+            force_group = bool(force_positions.intersection(positions))
+            geometry, method = merge_geometry(originals[members], parameters, force=force_group)
             if geometry is None:
-                events.append(
-                    {
-                        "iteration": iteration,
-                        "decision": "review",
-                        "reason": method,
-                        "source_indices": members,
-                    }
-                )
-                continue
+                if force_group:
+                    geometry = shapely.union_all(originals[members])
+                    method = "preserved_source_parts_as_multipart"
+                else:
+                    events.append(
+                        {
+                            "iteration": iteration,
+                            "decision": "review",
+                            "reason": method,
+                            "source_indices": members,
+                        }
+                    )
+                    continue
             wid = min(work_ids)
             source_members[wid] = members
             successful.append((positions, wid, geometry))
@@ -299,6 +399,12 @@ def repair_seams(source, parameters):
                 }
             )
         if not successful:
+            current, new_internal = _merge_internal_parts(
+                current, parameters, grids, force_merge_area, merge_all_grid_candidates
+            )
+            internal_events.extend(new_internal)
+            if new_internal and iteration + 1 < parameters.maximum_iterations:
+                continue
             break
         remove = {i for positions, _, _ in successful for i in positions}
         records = [
@@ -310,15 +416,35 @@ def repair_seams(source, parameters):
         current = (
             gpd.GeoDataFrame(records, crs=frame.crs).sort_values("work_id").reset_index(drop=True)
         )
+        current, new_internal = _merge_internal_parts(
+            current, parameters, grids, force_merge_area, merge_all_grid_candidates
+        )
+        internal_events.extend(new_internal)
 
+    current, new_internal = _merge_internal_parts(
+        current, parameters, grids, force_merge_area, merge_all_grid_candidates
+    )
+    internal_events.extend(new_internal)
     membership, rows = [], []
     review_ids = set()
     final_candidates = find_seam_candidates(current, parameters)
     for row in final_candidates.itertuples():
-        if is_grid_supported(row, grids, parameters):
+        in_area = (
+            merge_all_grid_candidates
+            or force_merge_area is None
+            or (
+                current.geometry.iloc[row.left].intersection(force_merge_area).area > 0
+                or current.geometry.iloc[row.right].intersection(force_merge_area).area > 0
+            )
+        )
+        if is_grid_supported(row, grids, parameters) and in_area:
             review_ids.update(
                 [int(current.work_id.iloc[row.left]), int(current.work_id.iloc[row.right])]
             )
+    if merge_all_grid_candidates and review_ids:
+        raise ValueError(
+            "Supported seams remain after the configured merge passes; increase maximum_iterations."
+        )
     for row in current.itertuples():
         members = source_members[int(row.work_id)]
         ids = sorted(frame.id.iloc[members].tolist())
@@ -331,18 +457,28 @@ def repair_seams(source, parameters):
         parts = frame.iloc[members]
         heights = sorted(set(parts.height_extent_m.astype(float)))
         conflict = len(heights) > 1
+        internal_events_for_building = [
+            event for event in internal_events if event["work_id"] == int(row.work_id)
+        ]
+        internal_merged = bool(internal_events_for_building)
+        for event in internal_events_for_building:
+            event["building_id"] = uid
+            event["source_ids"] = ids
         record = {
             "id": uid,
             "geometry": row.geometry,
             "source": "Rhino footprints with grid seam repair",
             "source_ids_json": json.dumps(ids),
             "source_component_count": len(members),
-            "seam_merged": merged,
-            "height_extent_m": heights[0] if not conflict else np.nan,
+            "seam_merged": merged or internal_merged,
+            "internal_seam_merged": internal_merged,
+            "internal_seam_merge_count": len(internal_events_for_building),
+            "height_extent_m": max(heights),
             "model_height_min_m": min(heights),
             "model_height_max_m": max(heights),
             "model_height_values_json": json.dumps(heights),
             "height_conflict": conflict,
+            "height_aggregation_method": "max_source_component_height",
             "height_is_survey_verified": False,
             "is_verified_individual_building": False,
             "remaining_seam_review": int(row.work_id) in review_ids,
@@ -350,9 +486,17 @@ def repair_seams(source, parameters):
             "footprint_requires_review": bool(parts.footprint_requires_review.any())
             or merged
             or int(row.work_id) in review_ids,
-            "repair_basis": "repeated_grid_and_continuous_outline"
-            if merged
-            else "original_geometry",
+            "repair_basis": (
+                "+".join(
+                    value
+                    for value, applies in [
+                        ("repeated_grid_seam", merged),
+                        ("internal_multipart_grid_seam", internal_merged),
+                    ]
+                    if applies
+                )
+                or "original_geometry"
+            ),
             "repair_entity_verification": "algorithmic_candidate_not_survey_verified",
         }
         rows.append(record)
@@ -381,5 +525,7 @@ def repair_seams(source, parameters):
             "result_count": len(repaired),
             "merged_groups": int(repaired.seam_merged.sum()),
             "height_conflict_groups": int(repaired.height_conflict.sum()),
+            "internal_seam_merge_events": internal_events,
+            "remaining_seam_review_in_authorized_area": len(review_ids),
         },
     )

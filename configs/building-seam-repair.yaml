@@ -5,6 +5,9 @@ georeferencing_report: ../data/suzhou_old_city/georeferenced/georeferencing.json
 area_local: ../data/suzhou_old_city/area.parquet
 area_metric: ../data/suzhou_old_city/georeferenced/analysis_window.parquet
 output_dir: ../data/suzhou_old_city/repaired
+# Explicitly merge all seams supported by the repeated source grid, including
+# the previously deferred outlines and close parts inside source MultiPolygons.
+merge_all_grid_supported_candidates: true
 parameters:
   # Native model XY units, not true ground metres. Only diagnostic/repair tolerances.
   neighbor_tolerance: 0.08

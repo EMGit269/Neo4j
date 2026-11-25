@@ -67,7 +67,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=Path("datasets/suzhou-20261124.json"))
+    parser.add_argument("--manifest", type=Path, default=Path("datasets/suzhou-20261125.json"))
     parser.add_argument("--destination", type=Path, default=Path("."))
     parser.add_argument("--part", choices=["all", "sources", "analysis"], default="all")
     main(parser.parse_args())

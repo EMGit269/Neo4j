@@ -152,7 +152,8 @@ Promise.all(descriptions.map(async([file,label,style,visible])=>{
  pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:4,...style,renderer}),
  onEachFeature:(f,l)=>{const p=f.properties,el=document.createElement('div');
  el.textContent=[p.name,p.id||p.osm_id||p.osm_uid,p.category,p.role||p.poi_role,
- p.height_conflict?'源块模型高度 '+p.model_height_min_m+'–'+p.model_height_max_m+' m（冲突）':
+ p.height_conflict?'整栋取源块最高模型高度 '+p.height_extent_m+' m（源块范围 '+
+  p.model_height_min_m+'–'+p.model_height_max_m+' m）':
  p.height_extent_m?'模型高 '+p.height_extent_m+' m':'',
  p.seam_merged?'已合并 '+p.source_component_count+' 个源块':'']
  .filter(Boolean).join(' · ');l.bindPopup(el);}});

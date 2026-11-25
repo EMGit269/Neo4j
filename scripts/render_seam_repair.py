@@ -60,7 +60,7 @@ def main():
     fig.text(
         0.06,
         0.07,
-        "两块已合并为一个完整轮廓；保留原始 ID、6 m / 3 m 的模型高度，未虚构统一高度。",
+        "已合并为一个轮廓；整组高度按源块最大值记录，并保留每个源块的高度。",
         fontsize=10,
         color="#426057",
     )
@@ -74,7 +74,7 @@ def main():
         plot_pair(row_axes, row, labels=False)
         row_axes[0].set_title(f"合并前 · {row.source_component_count} 块", fontsize=10)
         row_axes[1].set_title(
-            f"合并后 · {row.area_m2:.1f} m² · 高度{'冲突' if row.height_conflict else '一致'}",
+            f"合并后 · {row.area_m2:.1f} m² · 整组高度 {row.height_extent_m:g} m",
             fontsize=10,
         )
     fig.tight_layout()

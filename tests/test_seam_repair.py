@@ -43,7 +43,7 @@ def parameters():
     return replace(SeamParameters(), grid_minimum_pairs=2, grid_minimum_spatial_span=50)
 
 
-def test_repeated_grid_repair_preserves_coverage_ids_and_conflicting_heights(parameters):
+def test_repeated_grid_repair_preserves_coverage_ids_and_uses_maximum_height(parameters):
     source = fixture_source()
     before = source.geometry.union_all()
     result, members, _, report = repair_seams(source, parameters)
@@ -51,11 +51,12 @@ def test_repeated_grid_repair_preserves_coverage_ids_and_conflicting_heights(par
     assert report["merged_groups"] == 6
     assert set(members.source_id) == set(source.id)
     assert members.source_id.is_unique
-    assert result.height_extent_m.isna().all()
+    assert result.height_extent_m.eq(6).all()
     assert result.height_conflict.all()
     assert result.model_height_min_m.eq(3).all()
     assert result.model_height_max_m.eq(6).all()
     assert all(json.loads(v) == [3.0, 6.0] for v in result.model_height_values_json)
+    assert result.height_aggregation_method.eq("max_source_component_height").all()
     assert before.symmetric_difference(result.geometry.union_all()).area < 1e-8
     again, again_members, _, _ = repair_seams(source, parameters)
     assert result.id.tolist() == again.id.tolist()
@@ -136,3 +137,76 @@ def test_precision_merge_does_not_mistake_erased_internal_vertices_for_movement(
     assert method == "mutual_seam_snap_union"
     assert repaired is not None and repaired.is_valid
     assert repaired.symmetric_difference(shapely.union_all(originals)).area < 0.3
+
+
+def test_internal_multipart_grid_seam_is_dissolved_in_requested_area(parameters):
+    from shapely.geometry import MultiPolygon, box
+
+    from urban_fabric.seam_repair import _merge_internal_parts
+
+    frame = gpd.GeoDataFrame(
+        {
+            "work_id": [0],
+            "id": ["source:1"],
+            "geometry": [
+                MultiPolygon([box(0, 0, 10, 10), box(10.02, 0, 20, 10), box(30, 0, 35, 5)])
+            ],
+        },
+        geometry="geometry",
+        crs=LOCAL_METRES,
+    )
+    area = box(-1, -1, 25, 11)
+    repaired, events = _merge_internal_parts(
+        frame,
+        parameters,
+        [
+            {
+                "axis": "x",
+                "minimum_coordinate": 9.9,
+                "maximum_coordinate": 10.1,
+            }
+        ],
+        area,
+        merge_all_grid_candidates=False,
+    )
+    assert len(events) == 1
+    assert repaired.geometry.iloc[0].geom_type == "MultiPolygon"
+    assert len(shapely.get_parts(repaired.geometry.iloc[0])) == 2
+    assert repaired.geometry.iloc[0].covers(box(0, 0, 20, 10).buffer(-0.01))
+
+
+def test_user_requested_grid_seams_merge_even_when_outer_edges_do_not_continue(parameters):
+    import pandas as pd
+
+    source = fixture_source()
+    extras = gpd.GeoDataFrame(
+        [
+            {
+                "id": "extra:left",
+                "component_id": 9001,
+                "height_extent_m": 3.0,
+                "footprint_requires_review": False,
+                "geometry": box(-10, 250, 0, 260),
+            },
+            {
+                "id": "extra:right",
+                "component_id": 9002,
+                "height_extent_m": 9.0,
+                "footprint_requires_review": False,
+                "geometry": box(0, 255, 20, 268),
+            },
+        ],
+        crs=LOCAL_METRES,
+    )
+    source = gpd.GeoDataFrame(
+        pd.concat([source, extras], ignore_index=True),
+        geometry="geometry",
+        crs=LOCAL_METRES,
+    )
+    result, membership, _, _ = repair_seams(source, parameters, merge_all_grid_candidates=True)
+    ids = membership[membership.source_id.str.startswith("extra:")].building_id.unique()
+    assert len(ids) == 1
+    merged = result[result.id == ids[0]].iloc[0]
+    assert merged.height_extent_m == 9
+    assert merged.height_conflict
+    assert not result.remaining_seam_review.any()

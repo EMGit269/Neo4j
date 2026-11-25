@@ -158,11 +158,14 @@ const layer=L.geoJSON(data,{renderer:buildingRenderer,pane:'buildings',
 style:{color:'#7f9185',weight:.45,fillColor:'#aebbb0',fillOpacity:.6},
 onEachFeature:(f,l)=>{const p=f.properties,box=document.createElement('div');
 const height=p.height_conflict?
-'源块模型高度：'+p.model_height_min_m+'–'+p.model_height_max_m+' m（冲突，未指定整栋高度）':
+'整栋取源块最高模型高度：'+p.height_extent_m+' m（源块范围 '+
+p.model_height_min_m+'–'+p.model_height_max_m+' m；未经实测核验）':
 '模型高度：'+p.height_extent_m+' m（未经实测核验）';
 ['建筑候选 '+p.id,height,
 '轮廓面积：'+Number(p.area_m2).toFixed(1)+' m²',
-p.seam_merged?'已合并 '+p.source_component_count+' 个源块；建筑实体仍待核':'保持源轮廓',
+p.seam_merged?'已合并分缝；原始模型高度按源块最高值赋给整组，建筑实体仍待核':'保持源轮廓',
+p.internal_seam_merged?'已合并同一多部件轮廓内部的网格接缝':'',
+p.source_component_count>1?'合并了 '+p.source_component_count+' 个源组件':'',
 p.remaining_seam_review?'附近仍有疑似分缝待核':'',
 p.footprint_requires_review?'轮廓待核':'未标记轮廓问题；不代表已人工核验',
 '尚未与 POI 建立逐栋功能对应'].forEach(t=>{
@@ -172,9 +175,11 @@ l.bindPopup(box);}
 Object.values(categories).forEach(group=>group.eachLayer(marker=>marker.bringToFront()));
 control.addOverlay(layer,BUILDING_LABEL+' · '+data.features.length.toLocaleString());
 const mergedCount=data.features.filter(f=>f.properties.seam_merged).length;
+const remainingCount=data.features.filter(f=>f.properties.remaining_seam_review).length;
 document.getElementById('building-status').textContent=
 '已加载 '+data.features.length.toLocaleString()+' 个建筑候选轮廓（灰色）'+
-(mergedCount?'，其中 '+mergedCount+' 组已合并分缝。':'，可在右侧开关。');
+(mergedCount?'，其中 '+mergedCount+' 组已合并分缝。':'，可在右侧开关。')+
+(remainingCount?'仍有 '+remainingCount+' 个候选待核。':'重复网格疑似分缝已全部合并。');
 const repairedHighlights=L.geoJSON(data,{renderer:buildingRenderer,pane:'buildings',
 filter:f=>Boolean(f.properties.seam_merged),
 style:{color:'#cb7139',weight:1.5,fill:false},interactive:false});
@@ -182,7 +187,7 @@ if(mergedCount)control.addOverlay(repairedHighlights,'标出已合并建筑');
 const remaining=L.geoJSON(data,{renderer:buildingRenderer,pane:'buildings',
 filter:f=>Boolean(f.properties.remaining_seam_review),
 style:{color:'#9f4c8c',weight:1.5,fill:false},interactive:false});
-control.addOverlay(remaining,'标出仍待核的分缝周边轮廓');
+if(remainingCount)control.addOverlay(remaining,'标出仍待核的分缝周边轮廓');
 }).catch(()=>document.getElementById('building-status').textContent=
 '建筑图层未加载，请刷新重试或查看下方静态图。');
 const originalBuildings=L.layerGroup();let originalLoaded=false;

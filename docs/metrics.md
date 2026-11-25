@@ -50,8 +50,10 @@ OSMnx 简化后物理网络包含真实路口及部分端点，去掉反向行�
 `area_in_window_m2` 计窗口内部分；面积、周长和 momepy 形态指标使用完整候选底轮廓。
 `footprint_requires_review` 标记分割歧义、重叠或几何问题；未标记不等于已实测核验。
 规则分块修复后提供 `seam_merged`、`source_component_count` 和来源 ID 列表。
-组内源块高度不同则 `height_conflict=true`，`height_extent_m` 与整组棱柱体积留空，
-保留 `model_height_min_m/max_m` 与逐源块高度，不自动当作真实建筑高差。
+`height_extent_m` 按用户指定取组内源块最高模型高度；
+`model_height_min_m/max_m` 与逐源块高度仍保留，`height_conflict=true` 表示源块高度不同。
+`estimated_prism_volume_m3` 以最高源块高度估算，是可比较的上界口径，不等于实测整栋体积；
+原始分块体积估计另存在 `source_parts_prism_estimate_sum_m3`。
 地理配准导出中的 `length_m` 在真实投影下计算；`legacy_local_*` 仍是历史模型单位测量。
 来源线尚未确认为可路由街段。
 

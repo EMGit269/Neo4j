@@ -8,8 +8,8 @@
 
 - 原始模型：`source_files/苏州城市模型.3dm`，只读保留。
 - 全域提取：`data/suzhou_rhino_model/`，111,347 个建筑几何候选单元。
-- 古城区分析窗口：原始提取 22,700 个候选，规则分缝合并后为 **22,073 个候选轮廓**。
-- 当前建筑：`data/suzhou_old_city/repaired/`，623 组经算法合并，480 个候选仍有疑似接缝待核。
+- 古城区分析窗口：原始 22,700 个相交候选，合并全部网格疑似分缝及内部多部件接缝后为 **21,827 个轮廓**。
+- 当前建筑：`data/suzhou_old_city/repaired/`，944 个候选含接缝合并，待处理疑似分缝为 0。
 - 窗口配置：[suzhou-old-city.yaml](configs/suzhou-old-city.yaml)。
 - 详细方法和数据限制：[苏州模型说明](docs/suzhou-rhino-model.md)。
 - 配准方法、转换公式：[坐标恢复说明](docs/suzhou-georeferencing.md)。
@@ -26,8 +26,9 @@
 建筑模型高度为 3–96 m（当前窗口），全部为 3 m 的整数倍，来源和制作方法尚未核实。
 模型 XY 实为经纬度×100000 后平移，Rhino 的“米”声明不能当成真实平面比例；
 已通过 66,981 条对应道路线段恢复坐标，并在真实投影下重算指标。
-已按重复网格与外轮廓连续性合并源模型分块。618 个合并组存在源块高度冲突，
-保留高度范围和每个原块的高度，整组 `height_extent_m` 留空，不虚构统一高度。
+已合并全模型检测到的重复网格分缝，包括单个多部件轮廓内部的分缝；
+合并组的 `height_extent_m` 采用源块最高模型高度，同时保留各源块高度和冲突范围。
+这一高度未经测绘核验，棱柱体积是按最高源块高度计算的估算上界。
 方法、来源对应和验证见 [建筑分缝修复](docs/building-seams.md)。
 旧局部数据保留用于溯源。**建筑单元和模型高度尚未全部核验，道路尚未确认为可路由网络**。
 
@@ -45,7 +46,7 @@ python -m pip install -e ".[dev,rhino,pbf,plot]"
 ```
 
 原始 `.3dm`、配套 SHP 和当前 GIS/地图通过
-[Release 数据包](https://github.com/EMGit269/Neo4j/releases/tag/suzhou-data-20261124) 提供。
+[Release 数据包](https://github.com/EMGit269/Neo4j/releases/tag/suzhou-data-20261125) 提供。
 Git 克隆不包含这些大文件；下载脚本按清单验证大小和 SHA-256，并保留已有研究文件。
 完整恢复请使用干净的克隆或空目标目录，详见 [数据清单与恢复说明](datasets/README.md)。
 

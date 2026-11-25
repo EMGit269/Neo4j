@@ -43,6 +43,7 @@ def main(config_path):
     source = gpd.read_parquet(resolve("source_local"))
     area_local = gpd.read_parquet(resolve("area_local"))
     area_metric = gpd.read_parquet(resolve("area_metric"))
+    core_local = area_local.geometry.iloc[0]
     registration = json.loads(resolve("georeferencing_report").read_text())
     transform = GeographicModelTransform(
         **{k: registration["transform"][k] for k in ["offset_x", "offset_y", "units_per_degree"]}
@@ -53,8 +54,12 @@ def main(config_path):
     print(
         f"Checking all {len(source):,} source candidates to complete boundary groups…", flush=True
     )
-    repaired_local, membership, decisions, audit = repair_seams(source, parameters)
-    core_local = area_local.geometry.iloc[0]
+    repaired_local, membership, decisions, audit = repair_seams(
+        source,
+        parameters,
+        force_merge_area=core_local if config.get("merge_all_grid_supported_candidates") else None,
+        merge_all_grid_candidates=bool(config.get("merge_all_grid_supported_candidates", False)),
+    )
     selected = repaired_local[repaired_local.intersection(core_local).area > 0].copy()
     selected = selected.reset_index(drop=True)
     members = membership[membership.building_id.isin(selected.id)].copy()
@@ -91,8 +96,11 @@ def main(config_path):
     buildings["source_parts_prism_estimate_sum_m3"] = buildings.id.map(sums)
     buildings["height_semantics"] = np.where(
         buildings.height_conflict,
-        "Conflicting source-part model heights; no single height assigned.",
-        "Original model height, not surveyed.",
+        (
+            "Assigned maximum source-part model height; source heights vary and are "
+            "not survey verified."
+        ),
+        "Source model height; not survey verified.",
     )
     if (
         not buildings.id.is_unique
@@ -105,8 +113,8 @@ def main(config_path):
         .all()
     ):
         raise ValueError("Recalculated metrics/IDs failed validation.")
-    if not buildings.loc[buildings.height_conflict, "height_extent_m"].isna().all():
-        raise ValueError("A conflicting group was assigned a fabricated single height.")
+    if buildings.height_extent_m.isna().any():
+        raise ValueError("A source building group is missing its maximum source-part height.")
     original_core = source[source.intersection(core_local).area > 0]
     original_projected = projected(original_core[["id", "geometry"]], transform, crs)
     before_union = original_projected.geometry.union_all().intersection(core)
@@ -117,6 +125,21 @@ def main(config_path):
     current_source_ids = set(original_core.id)
     external_ids = set(parts.id) - current_source_ids
     reviewed = buildings[buildings.remaining_seam_review]
+    selected_source_ids = set(members.source_id)
+    forced_decisions = decisions[
+        decisions.decision.eq("accepted_user_requested_all_suspected_seams")
+    ]
+    window_forced_decisions = sum(
+        bool(
+            selected_source_ids.intersection(json.loads(row.left_source_ids))
+            or selected_source_ids.intersection(json.loads(row.right_source_ids))
+        )
+        for row in forced_decisions.itertuples()
+    )
+    window_internal_events = sum(
+        event.get("building_id") in set(buildings.id)
+        for event in audit["internal_seam_merge_events"]
+    )
     tables = {
         "buildings": buildings,
         "height_parts": height_parts,
@@ -147,18 +170,26 @@ def main(config_path):
         "model_height_max_m",
         "model_height_values_json",
         "height_conflict",
+        "height_aggregation_method",
         "area_m2",
         "footprint_requires_review",
         "seam_merged",
+        "internal_seam_merged",
+        "internal_seam_merge_count",
         "source_component_count",
         "remaining_seam_review",
         "source_ids_json",
         "geometry",
     ]
     buildings[map_columns].to_crs(4326).to_file(out / "buildings_wgs84.geojson", driver="GeoJSON")
-    reviewed[map_columns].to_crs(4326).to_file(
-        out / "remaining_review_wgs84.geojson", driver="GeoJSON"
-    )
+    if reviewed.empty:
+        (out / "remaining_review_wgs84.geojson").write_text(
+            json.dumps({"type": "FeatureCollection", "features": []}) + "\n"
+        )
+    else:
+        reviewed[map_columns].to_crs(4326).to_file(
+            out / "remaining_review_wgs84.geojson", driver="GeoJSON"
+        )
     report = {
         "created_at_utc": utc_now(),
         "study_area_id": config["study_area_id"],
@@ -169,6 +200,12 @@ def main(config_path):
         "full_model": {
             k: audit[k]
             for k in ["source_count", "result_count", "merged_groups", "height_conflict_groups"]
+        },
+        "full_model_seam_merges": {
+            "forced_grid_pair_decisions": int(
+                decisions.decision.eq("accepted_user_requested_all_suspected_seams").sum()
+            ),
+            "internal_multipart_merge_events": len(audit["internal_seam_merge_events"]),
         },
         "grid_evidence": audit["grids"],
         "window": {
@@ -182,6 +219,9 @@ def main(config_path):
             "additional_source_parts_outside_window": len(external_ids),
             "height_conflict_groups": int(buildings.height_conflict.sum()),
             "remaining_review_candidates": len(reviewed),
+            "internal_seam_merge_events": window_internal_events,
+            "forced_grid_seam_merges": window_forced_decisions,
+            "maximum_source_height_assignment": "max(source component height)",
             "footprint_coverage_area_before_m2": before_union.area,
             "footprint_coverage_area_after_m2": after_union.area,
             "symmetric_difference_area_m2": difference,
@@ -195,18 +235,28 @@ def main(config_path):
             "geometry_valid": True,
             "ids_unique": True,
             "coverage_preserved_within_tolerance": True,
-            "conflicting_single_heights_are_missing": True,
+            "all_building_heights_are_source_component_maximum": True,
             "layers": verification,
         },
         "limitations": [
             "Algorithmic footprint group repair, not surveyed building entity verification.",
-            "Conflicting model heights kept per source part; no single building height inferred.",
-            "Only repeated grids with continuous outlines accepted; residuals kept for review.",
+            (
+                "A group takes the maximum source-part model height; original heights "
+                "remain in height_parts."
+            ),
+            (
+                "Repeated-grid seams between candidates and inside multipart geometries "
+                "are merged; "
+                "building identity and height remain unverified."
+            ),
             "Original 3dm, extracted candidates and georeferenced source remain unchanged.",
         ],
     }
     write_json(out / "repair_report.json", report)
-    write_json(out / "all_model_merge_events.json", audit["events"])
+    write_json(
+        out / "all_model_merge_events.json",
+        audit["events"] + audit["internal_seam_merge_events"],
+    )
     (out / "repair_parameters.yaml").write_text(config_path.read_text())
     print(json.dumps(report["window"], ensure_ascii=False, indent=2), flush=True)
     print("Screenshot source membership:", report["screenshot_group"], flush=True)
